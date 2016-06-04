@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+# encoding: utf-8
+
+from yaml import load, dump
+try:
+    from yaml import CLoader as Loader, CDumper as Dumper
+except ImportError:
+    from yaml import Loader, Dumper
+import yaml
+import os, sys, subprocess, tempfile
+import argparse
+
+def action_edit(query):
+    if 'EDITOR' not in os.environ:
+        print("Please set the 'EDITOR' environment variable", file=sys.stderr)
+        raise SystemExit(1)
+ 
+    if query[1]:
+        data = query[1].run()
+    else:
+        data = query[0].run()
+    if type(data) not in (list,str,dict):
+        data = [item for item in data]
+    else:
+        data = [data,]
+    yml = yaml.safe_dump(data, default_flow_style=False, allow_unicode=True)
+    cmd = os.getenv('EDITOR')
+    fd, temp_path = tempfile.mkstemp(prefix='revim.')
+    with open(temp_path, "r+") as f:
+        f.write(yml.replace('\n- ', '\n\n- '))
+        f.seek(0)
+        subprocess.check_call(cmd + ' ' + temp_path, shell=True)
+        yml = f.read()
+        f.truncate()
+        f.close
+
+    os.close(fd)
+    os.remove(temp_path)
+
+    try:
+      data = yaml.load(yml)
+    except:
+      print("Oops, that YAML didn't appear to be valid!", file=sys.stderr)
+      raise SystemExit(1)
+    for i in data:
+        if 'id' in i:
+            query[0].update(i).run()
+        else:
+            query[0].insert(i).run()
+
+def interact():
+    import code
+    code.InteractiveConsole(locals=globals()).interact()
+
+import rethinkdb as r
+r.connect().repl()
+
+import argparse
+
+parser = argparse.ArgumentParser(description='Edit a rethinkdb table')
+parser.add_argument('paths', type=str, nargs='+',
+                    help='list of database.tables to edit')
+parser.add_argument('--repl',"-r", dest='repl', action='store_true',help="Run in a python repl for more complicated queries")
+parser.add_argument('--no-edit',"-n", dest='noedit', action='store_true',help="Read/write from stdout/in instead of opening vim")
+
+args = parser.parse_args()
+
+q=[]
+
+for path in args.paths:
+    path = path.split(".")
+    items = None
+    query = r
+    query = query.db(path[0])
+    query = query.table(path[1])
+    if len(path) == 3:
+        queryString = path[2].split(":")
+        if len(queryString) != 2:
+            items = query.get(path[2])
+        else:
+            items = query.get_all(queryString[1], index=queryString[0])
+    
+    q.append((query,items))
+
+for item in q:
+    action_edit(item)
+
+if args.repl:
+    interact()
