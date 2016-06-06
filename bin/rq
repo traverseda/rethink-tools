@@ -10,7 +10,7 @@ import yaml
 import os, sys, subprocess, tempfile
 import argparse
 
-def action_edit(query):
+def action_edit(query, filters=None):
     if 'EDITOR' not in os.environ:
         print("Please set the 'EDITOR' environment variable", file=sys.stderr)
         raise SystemExit(1)
@@ -26,10 +26,14 @@ def action_edit(query):
     yml = yaml.safe_dump(data, default_flow_style=False, allow_unicode=True)
     cmd = os.getenv('EDITOR')
     fd, temp_path = tempfile.mkstemp(prefix='revim.')
+
     with open(temp_path, "r+") as f:
         f.write(yml.replace('\n- ', '\n\n- '))
         f.seek(0)
-        subprocess.check_call(cmd + ' ' + temp_path, shell=True)
+        if "vim" in cmd:
+            subprocess.check_call(cmd + ' -c "set syntax=yaml" ' + temp_path, shell=True)
+        else:
+            subprocess.check_call(cmd + ' ' + temp_path, shell=True)
         yml = f.read()
         f.truncate()
         f.close
@@ -61,7 +65,7 @@ parser = argparse.ArgumentParser(description='Edit a rethinkdb table')
 parser.add_argument('paths', type=str, nargs='+',
                     help='list of database.tables to edit')
 parser.add_argument('--repl',"-r", dest='repl', action='store_true',help="Run in a python repl for more complicated queries")
-parser.add_argument('--no-edit',"-n", dest='noedit', action='store_true',help="Read/write from stdout/in instead of opening vim")
+#parser.add_argument('--no-edit',"-n", dest='noedit', action='store_true',help="Read/write from stdout/in instead of opening vim")
 
 args = parser.parse_args()
 
@@ -82,8 +86,11 @@ for path in args.paths:
     
     q.append((query,items))
 
-for item in q:
-    action_edit(item)
+def edit():
+    for item in q:
+        action_edit(item)
 
 if args.repl:
     interact()
+else:
+    edit()

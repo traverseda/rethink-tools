@@ -15,9 +15,11 @@ There's also a time tracker called
 
  - ti
 
-A fork of ti.sharats.me that uses rethinkdb as it's backend. "rq" is partially
+A fork of [ti.sharats.me](http://ti.sharats.me/) that uses rethinkdb as it's backend. "rq" is partially
 inspired by it's "ti e" command.
 
 ---
 
 Add bin to your path.
+
+Add this repo to your pythonpath.

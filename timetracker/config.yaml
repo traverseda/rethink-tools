@@ -1,0 +1,6 @@
+- name: timetracker
+  db: timetracker
+  tables:
+  - work
+  - projects
+
