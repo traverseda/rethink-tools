@@ -37,11 +37,11 @@ import sys
 from db import r
 
 from colorama import *
+from tzlocal import get_localzone
+
+local_tz = get_localzone() 
 
 class JsonStore(object):
-
-    def __init__(self, filename):
-        self.filename = filename
 
     def load(self):
 
@@ -55,7 +55,10 @@ class JsonStore(object):
         for index, workPeriod in enumerate(data['work']):
             for key,value in workPeriod.items():
                 if key in ('start','end'):
-                    data['work'][index][key] = to_datetime(value)
+                    if type(data['work'][index][key]) != datetime:
+                        data['work'][index][key] = parse_isotime(value)
+                    else:
+                        data['work'][index][key] = pytz.utc.localize(data['work'][index][key])
         for i in data['work']:
             if 'id' in i:
                 r.table("work").replace(i).run()
@@ -108,24 +111,12 @@ def action_on(name, time):
 
 
 def action_fin(time, back_from_interrupt=True):
-    ensure_working()
+    data = ensure_working()
 
-    data = store.load()
-
-    current = data['work'][-1]
+    current = data[0]
     current['end'] = time
-    store.dump(data)
+    store.dump({"work":[current,]})
     print('So you stopped working on ' + red(current['name']) + '.')
-
-    if back_from_interrupt and len(data['interrupt_stack']) > 0:
-        name = data['interrupt_stack'].pop()['name']
-        store.dump(data)
-        action_on(name, time)
-        if len(data['interrupt_stack']) > 0:
-            print('You are now %d deep in interrupts.' % len(data['interrupt_stack']))
-        else:
-            print('Congrats, you\'re out of interrupts!')
-
 
 def action_interrupt(name, time):
     ensure_working()
@@ -216,30 +207,26 @@ def timeToString(name, item):
     #log[name]['tmsg'] 
     return ', '.join(tmsg)[::-1].replace(',', ' &'[::-1], 1)[::-1]
 
+import pytz
+
 import math
 def action_log(period):
+    
+    work = r.table("work")
     if period:
         period = " ".join(period)
-    data = store.load()
-    work = data['work'] + data['interrupt_stack']
+        period = parse_isotime(period)
+        work=work.filter(r.row["start"]>period)
     log = defaultdict(lambda: {'delta': timedelta()})
     current = None
 
-    for item in work:
-        start_time = parse_isotime(item['start'])
-        if period and start_time > parse_isotime(period):
-            if 'end' in item:
-                log[item['name']]['delta'] += parse_isotime(item['end']) - start_time
-            else:
-                log[item['name']]['delta'] += datetime.now() - start_time
-                current = item['name']
-        elif not period:
-            if 'end' in item:
-                log[item['name']]['delta'] += parse_isotime(item['end']) - start_time
-            else:
-                log[item['name']]['delta'] += datetime.now() - start_time
-                current = item['name']
-
+    for item in work.run():
+        start_time = item['start']
+        if 'end' in item:
+            log[item['name']]['delta'] += item['end'] - start_time
+        else:
+            log[item['name']]['delta'] += datetime.now() - start_time
+            current = item['name']
 
     name_col_len = 0
     hourlyRate=50
@@ -251,7 +238,7 @@ def action_log(period):
     log['total']['delta']=total
 
     if period:
-        print("For {} to {}".format(parse_isotime(period), parse_isotime("now")))
+        print("For {} to {}".format(period, parse_isotime("now")))
 
     name_col_len = 0
     for name, item in list(log.items()):
@@ -302,17 +289,22 @@ def action_edit():
 
 
 def is_working():
-    data = store.load()
-    return data.get('work') and 'end' not in data['work'][-1]
+    data = r.table("work").filter(
+        lambda work: (~work.has_fields('end'))
+    ).run()
+    data=[i for i in data]
+    return data
 
 
 def ensure_working():
-    if is_working(): return
-
-    print("For all I know, you aren't working on anything."
+    data = is_working()
+    if data: 
+        return data
+    else:
+        print("For all I know, you aren't working on anything."
             " I don't know what to do.", file=sys.stderr)
-    print('See `ti -h` to know how to start working.', file=sys.stderr)
-    raise SystemExit(1)
+        print('See `ti -h` to know how to start working.', file=sys.stderr)
+        raise SystemExit(1)
 
 
 def to_datetime(timestr):
@@ -367,6 +359,7 @@ def parse_isotime(isotime):
         time = datetime.strptime(isotime, '%Y-%m-%dT%H:%M:%S.%fZ')
     except:
         time = parse_engtime(isotime)
+    time = pytz.utc.localize(time) 
     return time
 
 def timegap(start_time, end_time):
@@ -475,14 +468,65 @@ def parse_args(argv=sys.argv):
 
     return fn, args
 
+##-----------------
+##The intent parser
+##-----------------
+
+import json
+import sys
+from adapt.intent import IntentBuilder
+from adapt.engine import IntentDeterminationEngine
+
+engine = IntentDeterminationEngine()
+
+
+
+main_kwords = {
+  "on": ["o", "on", "work on"],
+  "fin": ["f","fin","finished"],
+  "status": ["s","status"],
+  "log": ["l","list","log"],
+}
+
+
+for key, value in main_kwords.items():
+    for wt in value:
+        engine.register_entity(wt, key)
+
+on_intent = IntentBuilder("onIntent")\
+    .require("on")\
+    .require("Task")\
+    .build()
+engine.register_intent_parser(on_intent)
+
+fin_intent = IntentBuilder("finIntent")\
+    .require("fin")\
+    .build()
+engine.register_intent_parser(fin_intent)
+
+status_intent = IntentBuilder("statusIntent")\
+    .require("status")\
+    .build()
+engine.register_intent_parser(status_intent)
+
+log_intent = IntentBuilder("logIntent")\
+    .require("log")\
+    .build()
+engine.register_intent_parser(log_intent)
+
+engine.register_regex_entity("(?P<Task>.*)")
+
+#if __name__ == "__main__":
+#    for intent in engine.determine_intent(' '.join(sys.argv[1:])):
+#        if intent.get('confidence') > 0:
+#            print(json.dumps(intent, indent=4))
+
 
 def main():
     fn, args = parse_args()
     fn(**args)
 
-
-store = JsonStore(os.getenv('SHEET_FILE', None) or
-                    os.path.expanduser('~/.ti-sheet'))
+store = JsonStore()
 
 if __name__ == '__main__':
     use_color = True

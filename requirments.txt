@@ -1,0 +1,4 @@
+pytz
+rethinkdb
+dateparser
+git+https://github.com/mycroftai/adapt#egg=adapt-parser
