@@ -60,11 +60,20 @@ import rethinkdb as r
 r.connect().repl()
 
 import argparse
+try:
+    import argcomplete
+    hasArgcomplete=True
+except ImportError:
+    hasArgcomplete=False
+    print("install the argcomplete library for tab completion.")
 
 parser = argparse.ArgumentParser(description='Edit a rethinkdb table')
 parser.add_argument('paths', type=str, nargs='+',
                     help='list of database.tables to edit')
 parser.add_argument('--repl',"-r", dest='repl', action='store_true',help="Run in a python repl for more complicated queries")
+if hasArgcomplete:
+    argcomplete.autocomplete(parser)
+#parser.add_argument('--remove',"-rm", dest='rm', action='store_cons',help="Deletes a row")
 #parser.add_argument('--no-edit',"-n", dest='noedit', action='store_true',help="Read/write from stdout/in instead of opening vim")
 
 args = parser.parse_args()
@@ -92,5 +101,9 @@ def edit():
 
 if args.repl:
     interact()
+
+#elif args.rm:
+#    print(args.rm)
+
 else:
     edit()

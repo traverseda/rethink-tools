@@ -46,7 +46,7 @@ class JsonStore(object):
     def load(self):
 
         data= {
-                 'work':[ item for item in r.table("work").run()],
+                 'work':[ item for item in r.table("work").order_by(r.desc("start")).run()],
                  'interrupt_stack':[]
                }
         return data
@@ -58,12 +58,16 @@ class JsonStore(object):
                     if type(data['work'][index][key]) != datetime:
                         data['work'][index][key] = parse_isotime(value)
                     else:
-                        data['work'][index][key] = pytz.utc.localize(data['work'][index][key])
+                        try:
+                            data['work'][index][key] = pytz.utc.localize(data['work'][index][key])
+                        except ValueError:
+                            pass
         for i in data['work']:
             if 'id' in i:
                 r.table("work").replace(i).run()
             else:
                 r.table("work").insert(i).run()
+
 
 def red(str):
     if use_color:
@@ -112,9 +116,10 @@ def action_on(name, time):
 
 def action_fin(time, back_from_interrupt=True):
     data = ensure_working()
-
     current = data[0]
+    print(time)
     current['end'] = time
+    print(current)
     store.dump({"work":[current,]})
     print('So you stopped working on ' + red(current['name']) + '.')
 
@@ -210,8 +215,10 @@ def timeToString(name, item):
 import pytz
 
 import math
-def action_log(period):
-    
+def action_log(period=None, tag=""):
+    hourlyRate=20
+#    tag = "machina"
+    tag = "dodjo"
     work = r.table("work")
     if period:
         period = " ".join(period)
@@ -220,16 +227,23 @@ def action_log(period):
     log = defaultdict(lambda: {'delta': timedelta()})
     current = None
 
+    if tag:
+        work = work.filter(
+           lambda work:
+               work["tags"].contains(tag)
+       )
+
+    work= work.distinct()
+
     for item in work.run():
         start_time = item['start']
         if 'end' in item:
             log[item['name']]['delta'] += item['end'] - start_time
         else:
-            log[item['name']]['delta'] += datetime.now() - start_time
+            log[item['name']]['delta'] += pytz.utc.localize(datetime.now()) - start_time
             current = item['name']
 
     name_col_len = 0
-    hourlyRate=50
 
     total=0
     for key,value in log.items():
@@ -429,7 +443,7 @@ def parse_args(argv=sys.argv):
 
     elif head in ['f', 'fin']:
         fn = action_fin
-        args = {'time': to_datetime(' '.join(tail))}
+        args = {'time': parse_isotime(' '.join(tail))}
 
     elif head in ['s', 'status']:
         fn = action_status
@@ -462,7 +476,8 @@ def parse_args(argv=sys.argv):
             'name': tail[0],
             'time': to_datetime(' '.join(tail[1:])),
         }
-
+    elif head in ['p', 'project']:
+        pass
     else:
         helpful_exit("I don't understand '" + head + "'")
 
@@ -478,8 +493,6 @@ from adapt.intent import IntentBuilder
 from adapt.engine import IntentDeterminationEngine
 
 engine = IntentDeterminationEngine()
-
-
 
 main_kwords = {
   "on": ["o", "on", "work on"],
