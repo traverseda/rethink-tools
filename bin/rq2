@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+# encoding: utf-8
+
+CACHEPATH="/tmp/.rqCache.shelve"
+
+import argparse, shelve
+try:
+    import argcomplete
+    hasArgcomplete=True
+except ImportError:
+    hasArgcomplete=False
+    print("install the argcomplete library for tab completion.")
+
+cache = shelve.open(CACHEPATH, flag='c', writeback=False)
+
+
+parser = argparse.ArgumentParser(description='Edit a rethinkdb table')
+parser.add_argument('paths', type=str, nargs='+',
+                    help='list of database.tables to edit')
+parser.add_argument('--repl',"-r", dest='repl', action='store_true',help="Run in a python repl for more complicated queries")
+
+if hasArgcomplete:
+    argcomplete.autocomplete(parser)
+
+"""
+Try to import at *little* as possible above this line, imports are the slowest in python
+and we want fast argument completion.
+"""
+
+import rethinkdb as r
+r.connect().repl()
+
+def updateCache():
+    cache['dbs']=[ i for i in r.db_list().run()]
+    cache['all']=[]
+    cache['tables']={}
+    for db in cache['dbs']:
+        tables = [ i for i in r.db(db).table_list().run()]
+        cache['tables'][db]=tables
+        cache['all']+[ db+"."+i for i in tables]
+
+updateCache():
+print(cache['all'])
